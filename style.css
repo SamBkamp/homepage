@@ -1,0 +1,24 @@
+@import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+
+:root {
+    --amber-text: #FABF2B;
+    --text-font: "VT323", monospace;
+}
+
+
+html, body{
+    background-color: black;
+    color: var(--amber-text);
+    font-family: var(--text-font);
+}
+
+#name{
+    margin-left: 2.5vw;
+}
+
+#brk{
+    height: 2px;
+    width: 95vw;
+    margin: 0 auto;
+    background-color: var(--amber-text);
+}
