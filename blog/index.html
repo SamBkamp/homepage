@@ -7,9 +7,11 @@
   <meta name="description" content="" />
   <link rel="stylesheet" type="text/css" href="../default.css" />
   <link rel="stylesheet" type="text/css" href="style.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/styles/default.min.css">
   <link rel="icon" href="favicon.png">
 </head>
 <body>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.1/highlight.min.js"></script>
   <div id="container">
     <h1>Understanding Clone - a weird linux syscall</h1>
     <hr id="brk">
@@ -92,6 +94,57 @@
     <p>
       what does clone3() actually do? First lets clear up some potential confusion (last bit of frontloading I promise): There are 2 versions of the clone syscall you can call from C. First you have the glibc clone() function, hereafter called "glibc clone", and the "raw" syscall, hereafter simply called "clone" or "clone3". The glibc clone is a simplified but also more dated version of the call, in this article i'll mainly be talking about the more direct raw clone syscall though.
     </p>
-  </div>
+    <p>
+      The clone syscall works very similar to the way fork() does, which is probably why this syscall isn't talked about so much. The fork syscall takes no arguments and is a lot easier to use but this comes at the expense of customizability. This is sufficient for 99% of the use-cases where you need a child program. Just like fork(), clone3() forks the calling process at its return and you must check its return value to figure out wether one is in the child or the parent. However, using the flags you can share as much or as little with the parent process as you want.
+    </p>
+    <p>
+      For instance, you can call clone with the CLONE_FS, CLONE_FILES and CLONE_VM flags for the child process to share the same open file descriptors, filesystem settings (chroot, umask, etc.) and critically: the same memory space. This means that any writes to memory done in the child process is reflected in the parent process, and any mmap'd or munmap'd memory is reflected also. This is a great way to implement a threading library where developers would prefer (and maybe expect) a shared memory approach to concurrency.
+    </p>
+    <p>
+      I'm using this syscall on a new containerisation project im writing called Pallet. Fork wasn't going to cut it and I needed something more customizeable and safe. Given how esoteric the clone3 syscall is, there was a lot of confusion and headaches trying to figure out how the intricacies of it works.
+    </p>
+    <p>
+      Instead of taking a list of arguments like the glibc clone does, it instead takes a clone_args struct that contains all the data. I prefer this approach as it makes the code more readable and self-documenting. Especially with the amount of arguments you can pass to this syscall. The first (and most important) field in this struct is flags. This expects a bunch of OR'd together macros that relay the settings you want in your new child process. This is where you specify which of the namespaces it should copy, share or create brand new of. All these flags are very well documented by the man pages and are also fairly self explanatory. The next field (exit_signal) is mostly important if your parent program wants to keep track of this child, it specifies a signal sent to the parent when the child exits. This is useful for a shell program for instance, where it might fork itself to execute the specified command, but wants to continue running once that program has finished executing. It can use the sigchild signal (alongside the wait*id group of syscalls) to sleep until the program is finished and doesn't need to spin.
+    </p>
+    <p>
+    One of my favorite features of clone is the stack argument. If the stack and stack_size arguments are defined (or non-zero, im not certain), the child program will use the location pointed to by stack as its stack. Like a proper, genuine stack. This may be omitted except for the case where the CLONE_VM flag is set, where its required. This is because the stack is shared (such that writes/maps on one process reflects on the other's) and therefore cannot share the same virtual address space AND physical address space. If the stack field is not defined then the contents of the parent's stack will be copied (with the usual linux copy-on-write semantics) to the child, but changes on one will not reflect on the other. For a containerisation program, I wanted the child (the container) to have its own virtual memory space, so CLONE_VM is not needed here. However, if the child process were to inheret the state of the parents stack on startup, a malicious program running in the container might use those leeks in some way or another.  
+    </p>
+    <p>
+      So, I had to give it a new stack to work with. I allocated this stack with mmap. This felt intuitive as Im going to need to allocate a decent amount of space to the child program and it was never going to be unallocated before the child program were to end. Even though the option exists, I didn't use the GROWS_DOWNWARD flag in my malloc call, and this is mostly because I feel it gels better with the stack argument in the cl_args struct. Let me explain: this is a quirk that caused me severe debugging headache for way too long. The documentation for the stack argument is a little bit ambigious in my opinion. This is not helped by the fact that the glibc clone and clone3 expect that argument to look differently. As mentioned, there isn't much data out there on the clone3 call so I was referencing a lot of example code written with the glibc clone call. In the glibc variant, the stack argument expects the pointer to point to the TOP of the stack. This is in contrast to clone3 which expects the stack pointer to point to the BOTTOM of the stack, and then uses the stack_size argument to deduce the first valid address on the stack. The confusion doesn't end there though, because clone3() treats stack + stack_size as a pointer to the low byte of a 8 byte value. Meaning if you have a 4KiB page starting from 0x00001000 (making your clone_args stack = 0x1000 and stack_size = 4096), clone3 will actually pop the first value at address 0x00002008. Ie. its taking stack + stack_size and saying "read 8 bytes from this location" and because my system is little-endian, it read upwards 8 bytes instead of downwards. At least, I think thats why this is happening.
+    </p>
+    <p>
+      All these segfault (and headache) inducing quirks made my head spin at first but at least now theres an online record of how this is supposed to work. This brings me to the next weird thing about allocating your child's stack: I kept mentioning in the above paragraph that the child would "read" from a certain address or pop a certain thing at the top of the stack, but why would it start all the way at the top? Well, the program is starting from a blank state, indeed the first read occurs when clone3 tries to return to the invoking caller (our child program). Those of you who have peeked under the hood of a compiled program before, a return is a pop then a jump. Basically, when a program calls a function, it pushes the return value (the address of the next instruction after the function) onto the stack and then jumps to the function. After the function is done with whatever its doing, it deallocates any remaining data it put on the stack over the course of the function, leaving the return value pushed by its caller at the top of the stack. This is then popped and jumped to. This is also why variables declared in functions go out of scope when the function returns - "scope" is just whatever data is on the stack and that data needs to be cleared before a function returns so it can access the return value. (yes I know this is oversimplified, leave me alone)
+    </p>
+    <p>
+      Anyway, all that is to say that when you allocate your own stack, the child process will pop the first value on the stack and jump to it to resume execution in the main function. If you allow your child process to clone or copy the parent's stack, this will be fine as the stack will look identical between the child and the parent in the moment the clone syscall returns. It will pop the value at the stack pointer and continue executing in the main function (or whatever function called the clone) just like fork(). However, if you define your own stack, this new child process doesn't have that data in its stack (its essentially a fresh start) and its stack pointer will just be pointing to the top of the stack. This means you need to 'seed' the stack with the location of where you want your child process to jump to after the clone syscall has returned. The easiest way to do that is to just place the address of a function at the top of the stack:
+    </p>
+    <pre><code class="language-c">
+void child_main_func(){
+      /* ... */
+}
+
+/* ... */
+
+char *stack =  mmap(NULL, page_size,...);
+
+uint64_t *stack_top = (stack+page_size); //use uint32_t for 32 bit machines etc... 
+*(--stack_top) = child_main_func;
+
+/*
+remember, stack+page_size is the end of the allocated data, we don't want to write beyond it.
+like how some_string[strlen(some_string)] is the null pointer and not the last character of the string
+*/
+</code></pre>
+    <p>
+      Now our child program will pop the top value of the stack and jump to our new main function. It's at this point its worth noting that child_main_func has become the "entry point" of our child program. Not like main() but the actual entrypoint _start. This means we cannot return 0 at the end of the function, theres nowhere to return to! We seeded the top of our stack with this function, theres nowhere further up the stack to pop from. This means to exit the child program we must instead call _exit() or similar.
+    </p>
+    <p>
+      So after all this, I think its fair to say that the clone syscall is an extremely cool one. One of the only, if not THE only, way for a userspace program to determine the stack and the stack contents of a child program. I didn't delve into the specifics of namespacing, but I feel this is well documented already and also kind of makes intuitive sense. At least moreso than the stack thing does. I understand why this syscall isn't super common, it only really has a few uses: to execute another program from itself like bash might do, to implement a threading library that uses shared memory, or for containerisation. Even though its uses are limited, the things that it can do are vitally important for core pieces of software that we use.
+    </p>
+    <p>
+      A hidden, unknown underdog hero of the linux kernel even.
+    </p>
+</div>
+<script>hljs.highlightAll();</script>
 </body>
 </html>
