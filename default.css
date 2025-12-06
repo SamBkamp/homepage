@@ -1,0 +1,20 @@
+@import url('https://fonts.googleapis.com/css2?family=VT323&display=swap');
+
+:root {
+    --amber-text: #FABF2B;
+    --text-supersat: #f9b300;
+    --text-complementary: #2A65FA;
+    --text-desat: #f9d67c;
+    --text-complementary-desat: #7ca0f9;
+    --text-font: "VT323", monospace;
+    --body-text-size: 22px;
+}
+
+a {
+    color: var(--text-complementary-desat);
+}
+
+#container{
+    margin-left: 2.5vw;
+    width: 95vw;
+}

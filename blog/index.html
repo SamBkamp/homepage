@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Sam Bonnekamp</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="description" content="" />
+  <link rel="stylesheet" type="text/css" href="../default.css" />
+  <link rel="stylesheet" type="text/css" href="style.css" />
+  <link rel="icon" href="favicon.png">
+</head>
+<body>
+  <div id="container">
+    <h1>Understanding Clone - a weird linux syscall</h1>
+    <hr id="brk">
+    <p>
+      The clone syscall is a niche one, It's hard to find info on the internet on how it works, and even less info about the newer clone3() call. So, why did I decide to use it?
+    </p>
+    <p>
+      it started with this talk from <a href="https://www.youtube.com/watch?v=8fi7uSYlOdc">Liz Rice</a> on containers where she, live on stage, demonstrated how to build a basic container in go from scratch. This enthralled me, I always thought containers were essentially Virtual Machines with stripped down OS' (without GUIs and without most device drivers), it turns out containers are more closely related to ftp servers than VMs. Instead of virtualising a whole operating system, containers are essentially jailed processes, much like how ftp servers give access to jailed users.
+    </p>
+    <p>
+      The core difference between a container and an FTP server (besides the obvious) is that the jailing expands far further than just chroot. This introduced me to a concept in Linux I had not really heard about before: namespaces. While the average linux user definetly interfaces with them, we rarely see, and therefore comprehend, the depth of these namespaces in casual use.
+    </p>
+    <p>
+      Looking at the man pages (namespaces(7)) it seems that the primary use of these namespaces is to implement containers specifically, I can't think of any other use of namespaces but I don't think it really needs any more. There exist 8 namespaces that isolate different aspects of a program:
+      
+    </p>
+    <table style="width: 80%; margin-left: 10%;">
+      <tr style="text-align: left;">
+        <th style="color: var(--text-supersat);">Namespace</th>
+        <th style="color: var(--text-supersat);">Flag</th>
+        <th style="color: var(--text-supersat);">Page</th>
+        <th style="color: var(--text-supersat);">Isolates</th>
+      </tr>
+      <tr>
+        <td>Cgroup</td>
+        <td>CLONE_NEWCGROUP</td>
+        <td>cgroup_namespaces(7)</td>
+        <td>Cgroup root directory</td>
+      </tr>
+      <tr>
+        <td>IPC</td>
+        <td>CLONE_NEWIPC</td>
+        <td>ipc_namespaces(7)</td>
+        <td>System V IPC, POSIX message queues</td>
+      </tr>
+      <tr>
+        <td>Network</td>
+        <td>CLONE_NEWNET</td>
+        <td>network_namespaces(7)</td>
+        <td>Network devices, stacks, ports, etc.</td>
+      </tr>
+      <tr>
+        <td>Mount</td>
+        <td>CLONE_NEWNS</td>
+        <td>mount_namespaces(7)</td>
+        <td>Mount points</td>
+      </tr>
+      <tr>
+        <td>PID</td>
+        <td>CLONE_NEWPID</td>
+        <td>pid_namespaces(7)</td>
+        <td>Process IDs</td>
+      </tr>
+      <tr>
+        <td>Time</td>
+        <td>CLONE_NEWTIME</td>
+        <td>time_namespaces(7)</td>
+        <td>Boot and monotonic clocks</td>
+      </tr>
+      <tr>
+        <td>User</td>
+        <td>CLONE_NEWUSER</td>
+        <td>user_namespaces(7)</td>
+        <td>User and Group IDs</td>
+      </tr>
+      <tr>
+        <td>UTS</td>
+        <td>CLONE_NEWUTS</td>
+        <td>user_namespaces(7)</td>
+        <td>Hostname and NIS domain name</td>
+      </tr>
+    </table>
+    <p style="font-size: 17px; margin-left: 10%; color: var(--text-desat)">from man namespaces(7)</p>
+    <p>
+      As you can tell, these are quite critical to containerisation and effective jailing of processes.
+    </p>
+    <p>
+      So about clone3()....
+    </p>
+    <p>
+      what does clone3() actually do? First lets clear up some potential confusion (last bit of frontloading I promise): There are 2 versions of the clone syscall you can call from C. First you have the glibc clone() function, hereafter called "glibc clone", and the "raw" syscall, hereafter simply called "clone" or "clone3". The glibc clone is a simplified but also more dated version of the call, in this article i'll mainly be talking about the more direct raw clone syscall though.
+    </p>
+  </div>
+</body>
+</html>

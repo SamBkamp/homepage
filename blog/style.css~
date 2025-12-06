@@ -4,17 +4,13 @@ html, body{
     font-family: var(--text-font);
 }
 
-p, li {
-    font-size: var(--body-text-size);
-}
-
-#name{
-    margin-left: 2.5vw;
-}
-
 #brk{
     height: 2px;
     width: 100%;
     margin: 0 auto;
     background-color: var(--amber-text);
+}
+
+p, li {
+    font-size: var(--body-text-size);
 }
